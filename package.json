@@ -1,0 +1,14 @@
+{
+  "name": "foto-webapp",
+  "private": true,
+  "scripts": {
+    "setup": "npm install && npm install --prefix server && npm install --prefix web && sh scripts/setup-pb.sh",
+    "pb": "cd pocketbase && ./pocketbase serve --http=127.0.0.1:8090",
+    "server": "npm run dev --prefix server",
+    "web": "npm run dev --prefix web",
+    "dev": "npx concurrently -n pb,api,web -c magenta,green,cyan \"npm run pb\" \"npm run server\" \"npm run web\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
