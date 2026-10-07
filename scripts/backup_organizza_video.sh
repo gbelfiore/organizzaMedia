@@ -169,9 +169,9 @@ fi
 
 mkdir -p "$BK_DIR" "$ORG_DIR" || exit 1
 
-# un report per esecuzione (con data e ora nel nome) + dettaglio file per file
-REPORT_FILE="${ORG_DIR}/report_backup_${MEDIA_LABEL}_${RUN_STAMP}.md"
-DETAIL_FILE="${ORG_DIR}/report_backup_${MEDIA_LABEL}_${RUN_STAMP}_dettaglio.tsv"
+# report e dettaglio restano fuori dalle cartelle dest (solo console / tmp)
+REPORT_FILE="${TMPDIR:-/tmp}/report_backup_${MEDIA_LABEL}_${RUN_STAMP}.md"
+DETAIL_FILE="${TMPDIR:-/tmp}/report_backup_${MEDIA_LABEL}_${RUN_STAMP}_dettaglio.tsv"
 INDEX_FILE="${BK_DIR}/indice_origine.tsv"
 printf 'fase\tesito\tfile\tdestinazione\tbyte\tnote\n' > "$DETAIL_FILE"
 

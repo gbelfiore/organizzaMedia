@@ -36,7 +36,7 @@ DEST_DIR="${DEST_DIR%/}"
 OTHER_DIR="${DEST_DIR}/others"
 STATS_ONLY=${STATS_ONLY:-0}
 LIMIT=${LIMIT:-0}
-REPORT_FILE="${REPORT_FILE:-${DEST_DIR}/report_altri_file.md}"
+REPORT_FILE="${REPORT_FILE:-}"
 REPORT_JSON="${REPORT_JSON:-}"
 
 if (( ! STATS_ONLY )); then
@@ -194,7 +194,6 @@ while IFS= read -r -d '' FILE; do
     fi
 done < <(find "$SOURCE_DIR" -type f -print0 | sort -z)
 
-mkdir -p "$(dirname "$REPORT_FILE")"
 DATE_NOW=$(date "+%Y-%m-%d %H:%M:%S")
 
 {
@@ -287,7 +286,12 @@ DATE_NOW=$(date "+%Y-%m-%d %H:%M:%S")
         echo "Nessun errore riscontrato durante la lavorazione."
     fi
     echo ""
-} | tee "$REPORT_FILE"
+} | if [[ -n "$REPORT_FILE" ]]; then
+    mkdir -p "$(dirname "$REPORT_FILE")"
+    tee "$REPORT_FILE"
+else
+    cat
+fi
 
 if [[ -n "$REPORT_JSON" ]]; then
     LIST_TMP="$(mktemp)"
@@ -320,5 +324,5 @@ if (( STATS_ONLY )); then
 else
     echo "File spostati in: $OTHER_DIR"
 fi
-echo "Report salvato in: $REPORT_FILE"
+[[ -n "$REPORT_FILE" ]] && echo "Report salvato in: $REPORT_FILE"
 echo "------------------------------------------------"

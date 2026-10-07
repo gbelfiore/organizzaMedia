@@ -37,7 +37,6 @@ else
 fi
 
 DEST_DIR="${DEST_DIR%/}"
-REPORT_FILE="${DEST_DIR}/report_organizzazione.md"
 
 mkdir -p "$DEST_DIR"
 
@@ -148,21 +147,28 @@ apply_date_from_timestamp() {
     return 0
 }
 
+HAS_EXIF_DATE=0
 extract_year_month() {
     local file="$1"
-    shift
-    local tag raw_y raw_m
     YEAR=""
     MONTH=""
-    for tag in "$@"; do
-        raw_y=$(exiftool -s3 -d "%Y" -"$tag" "$file" 2>/dev/null)
-        raw_m=$(exiftool -s3 -d "%m" -"$tag" "$file" 2>/dev/null)
-        if is_valid_date_parts "$raw_y" "$raw_m"; then
-            YEAR="$raw_y"
-            MONTH="$raw_m"
+    HAS_EXIF_DATE=0
+    META_DATETIME=""
+    local line field
+    line=$(exiftool -d "%Y:%m:%d %H:%M:%S" -p '$DateTimeOriginal|$CreateDate|$MediaCreateDate|$TrackCreateDate|$ContentCreateDate' "$file" 2>/dev/null)
+    [[ -z "$line" ]] && return 1
+    for field in ${(s:|:)line}; do
+        [[ "$field" == *:*:* ]] || continue
+        YEAR=${field:0:4}
+        MONTH=${field:5:2}
+        if is_valid_date_parts "$YEAR" "$MONTH"; then
+            META_DATETIME="$field"
+            HAS_EXIF_DATE=1
             return 0
         fi
     done
+    YEAR=""
+    MONTH=""
     return 1
 }
 
@@ -198,8 +204,7 @@ while IFS= read -r -d '' FILE; do
     CLEAN_DATE=""
     META_DATETIME=""
 
-    extract_year_month "$FILE" \
-        DateTimeOriginal CreateDate MediaCreateDate TrackCreateDate ContentCreateDate
+    extract_year_month "$FILE"
 
     FILENAME="$(basename "$FILE")"
     EXT_LOWER="${FILENAME:e:l}"
@@ -243,38 +248,29 @@ while IFS= read -r -d '' FILE; do
     TARGET_FILE="${TARGET_FOLDER}/${FILENAME}"
     mkdir -p "$TARGET_FOLDER"
 
+    if [[ -f "$TARGET_FILE" ]] && [[ "$(stat -f%z "$FILE" 2>/dev/null)" == "$(stat -f%z "$TARGET_FILE" 2>/dev/null)" ]]; then
+        log_msg "Già organizzata: $FILENAME -> ${REL_FOLDER}"
+        FOLDER_COUNTS[$REL_FOLDER]=$(( ${FOLDER_COUNTS[$REL_FOLDER]:-0} + 1 ))
+        continue
+    fi
+
     if cp -p "$FILE" "$TARGET_FILE" 2>/dev/null; then
-        exiftool -overwrite_original -TagsFromFile "$FILE" "-all:all" "$TARGET_FILE" &> /dev/null
-
         if is_valid_date_parts "$YEAR" "$MONTH"; then
-            EXISTING_DTO=$(exiftool -s3 -d "%Y" -DateTimeOriginal "$TARGET_FILE" 2>/dev/null)
-            EXISTING_CREATE=$(exiftool -s3 -d "%Y" -CreateDate "$TARGET_FILE" 2>/dev/null)
-            if ! is_valid_date_parts "$EXISTING_DTO" "01" && ! is_valid_date_parts "$EXISTING_CREATE" "01"; then
-                if [[ -n "$META_DATETIME" ]]; then
-                    META_DATE="$META_DATETIME"
-                else
-                    DAY="01"
-                    if [ -n "${CLEAN_DATE:-}" ] && [ ${#CLEAN_DATE} -ge 8 ]; then
-                        DAY=${CLEAN_DATE:6:2}
-                        [[ "$DAY" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || DAY="01"
-                    fi
-                    META_DATE="${YEAR}:${MONTH}:${DAY} 12:00:00"
+            if [[ -n "$META_DATETIME" ]]; then
+                META_DATE="$META_DATETIME"
+            else
+                DAY="01"
+                if [ -n "${CLEAN_DATE:-}" ] && [ ${#CLEAN_DATE} -ge 8 ]; then
+                    DAY=${CLEAN_DATE:6:2}
+                    [[ "$DAY" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || DAY="01"
                 fi
-                exiftool -overwrite_original \
-                    -DateTimeOriginal="$META_DATE" \
-                    -CreateDate="$META_DATE" \
-                    -ModifyDate="$META_DATE" \
-                    "$TARGET_FILE" &> /dev/null
+                META_DATE="${YEAR}:${MONTH}:${DAY} 12:00:00"
             fi
-
-            exiftool -overwrite_original \
-                "-FileModifyDate<CreateDate" \
-                "-FileCreateDate<CreateDate" \
-                "-FileModifyDate<DateTimeOriginal" \
-                "-FileCreateDate<DateTimeOriginal" \
-                "-ModifyDate<DateTimeOriginal" \
-                "-ModifyDate<CreateDate" \
-                "$TARGET_FILE" &> /dev/null
+            WRITE_ARGS=(-overwrite_original -P -FileModifyDate="$META_DATE" -FileCreateDate="$META_DATE")
+            if (( ! HAS_EXIF_DATE )); then
+                WRITE_ARGS+=(-DateTimeOriginal="$META_DATE" -CreateDate="$META_DATE" -ModifyDate="$META_DATE")
+            fi
+            exiftool "${WRITE_ARGS[@]}" "$TARGET_FILE" &> /dev/null
         fi
 
         log_msg "Copiata: $FILENAME -> ${REL_FOLDER}"
@@ -339,10 +335,9 @@ DATE_NOW=$(date "+%Y-%m-%d %H:%M:%S")
         echo "Nessun errore riscontrato durante la lavorazione."
     fi
     echo ""
-} > "$REPORT_FILE"
+}
 
 echo "------------------------------------------------"
 echo "Completato!"
 echo "Foto organizzate in: $DEST_DIR"
-echo "Report salvato in:   $REPORT_FILE"
 echo "------------------------------------------------"

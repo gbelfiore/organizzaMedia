@@ -40,7 +40,6 @@ DEST_DIR="${DEST_DIR%/}"
 FOTO_DIR="${DEST_DIR}/foto"
 VIDEO_DIR="${DEST_DIR}/video"
 OTHER_DIR="${DEST_DIR}/others"
-REPORT_FILE="${DEST_DIR}/report_organizzazione.md"
 
 mkdir -p "$FOTO_DIR" "$VIDEO_DIR"
 
@@ -191,21 +190,28 @@ apply_date_from_timestamp() {
     return 0
 }
 
+HAS_EXIF_DATE=0
 extract_year_month() {
     local file="$1"
-    shift
-    local tag raw_y raw_m
     YEAR=""
     MONTH=""
-    for tag in "$@"; do
-        raw_y=$(exiftool -s3 -d "%Y" -"$tag" "$file" 2>/dev/null)
-        raw_m=$(exiftool -s3 -d "%m" -"$tag" "$file" 2>/dev/null)
-        if is_valid_date_parts "$raw_y" "$raw_m"; then
-            YEAR="$raw_y"
-            MONTH="$raw_m"
+    HAS_EXIF_DATE=0
+    META_DATETIME=""
+    local line field
+    line=$(exiftool -d "%Y:%m:%d %H:%M:%S" -p '$DateTimeOriginal|$CreateDate|$CreationDate|$MediaCreateDate|$TrackCreateDate|$ContentCreateDate' "$file" 2>/dev/null)
+    [[ -z "$line" ]] && return 1
+    for field in ${(s:|:)line}; do
+        [[ "$field" == *:*:* ]] || continue
+        YEAR=${field:0:4}
+        MONTH=${field:5:2}
+        if is_valid_date_parts "$YEAR" "$MONTH"; then
+            META_DATETIME="$field"
+            HAS_EXIF_DATE=1
             return 0
         fi
     done
+    YEAR=""
+    MONTH=""
     return 1
 }
 
@@ -222,103 +228,61 @@ media_kind() {
 }
 
 apply_foto_metadata() {
-    local src="$1"
-    local dst="$2"
-    local year="$3"
-    local month="$4"
-    local clean_date="$5"
-    local meta_datetime="$6"
-
-    exiftool -overwrite_original -TagsFromFile "$src" "-all:all" "$dst" &> /dev/null
+    local dst="$1"
+    local year="$2"
+    local month="$3"
+    local clean_date="$4"
+    local meta_datetime="$5"
 
     if ! is_valid_date_parts "$year" "$month"; then
         return
     fi
 
-    local existing_dto existing_create day meta_date
-    existing_dto=$(exiftool -s3 -d "%Y" -DateTimeOriginal "$dst" 2>/dev/null)
-    existing_create=$(exiftool -s3 -d "%Y" -CreateDate "$dst" 2>/dev/null)
-    if ! is_valid_date_parts "$existing_dto" "01" && ! is_valid_date_parts "$existing_create" "01"; then
-        if [[ -n "$meta_datetime" ]]; then
-            meta_date="$meta_datetime"
-        else
-            day="01"
-            if [ -n "$clean_date" ] && [ ${#clean_date} -ge 8 ]; then
-                day=${clean_date:6:2}
-                [[ "$day" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || day="01"
-            fi
-            meta_date="${year}:${month}:${day} 12:00:00"
+    local day meta_date
+    if [[ -n "$meta_datetime" ]]; then
+        meta_date="$meta_datetime"
+    else
+        day="01"
+        if [ -n "$clean_date" ] && [ ${#clean_date} -ge 8 ]; then
+            day=${clean_date:6:2}
+            [[ "$day" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || day="01"
         fi
-        exiftool -overwrite_original \
-            -DateTimeOriginal="$meta_date" \
-            -CreateDate="$meta_date" \
-            -ModifyDate="$meta_date" \
-            "$dst" &> /dev/null
+        meta_date="${year}:${month}:${day} 12:00:00"
     fi
-
-    exiftool -overwrite_original \
-        "-FileModifyDate<CreateDate" \
-        "-FileCreateDate<CreateDate" \
-        "-FileModifyDate<DateTimeOriginal" \
-        "-FileCreateDate<DateTimeOriginal" \
-        "-ModifyDate<DateTimeOriginal" \
-        "-ModifyDate<CreateDate" \
-        "$dst" &> /dev/null
+    local write_args=(-overwrite_original -P -FileModifyDate="$meta_date" -FileCreateDate="$meta_date")
+    if (( ! HAS_EXIF_DATE )); then
+        write_args+=(-DateTimeOriginal="$meta_date" -CreateDate="$meta_date" -ModifyDate="$meta_date")
+    fi
+    exiftool "${write_args[@]}" "$dst" &> /dev/null
 }
 
 apply_video_metadata() {
-    local src="$1"
-    local dst="$2"
-    local year="$3"
-    local month="$4"
-    local clean_date="$5"
-    local meta_datetime="$6"
-
-    exiftool -overwrite_original -TagsFromFile "$src" "-all:all" "$dst" &> /dev/null
+    local dst="$1"
+    local year="$2"
+    local month="$3"
+    local clean_date="$4"
+    local meta_datetime="$5"
 
     if ! is_valid_date_parts "$year" "$month"; then
         return
     fi
 
-    local existing_create day meta_date
-    existing_create=$(exiftool -s3 -d "%Y" -CreateDate "$dst" 2>/dev/null)
-    if ! is_valid_date_parts "$existing_create" "01"; then
-        if [[ -n "$meta_datetime" ]]; then
-            meta_date="$meta_datetime"
-        else
-            day="01"
-            if [ -n "$clean_date" ] && [ ${#clean_date} -ge 8 ]; then
-                day=${clean_date:6:2}
-                [[ "$day" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || day="01"
-            fi
-            meta_date="${year}:${month}:${day} 12:00:00"
+    local day meta_date
+    if [[ -n "$meta_datetime" ]]; then
+        meta_date="$meta_datetime"
+    else
+        day="01"
+        if [ -n "$clean_date" ] && [ ${#clean_date} -ge 8 ]; then
+            day=${clean_date:6:2}
+            [[ "$day" =~ ^(0[1-9]|[12][0-9]|3[01])$ ]] || day="01"
         fi
-        exiftool -overwrite_original \
-            -CreateDate="$meta_date" \
-            -ModifyDate="$meta_date" \
-            -TrackCreateDate="$meta_date" \
-            -TrackModifyDate="$meta_date" \
-            -MediaCreateDate="$meta_date" \
-            -MediaModifyDate="$meta_date" \
-            "$dst" &> /dev/null
+        meta_date="${year}:${month}:${day} 12:00:00"
     fi
-
-    exiftool -overwrite_original \
-        "-FileModifyDate<CreationDate" \
-        "-FileCreateDate<CreationDate" \
-        "-FileModifyDate<ContentCreateDate" \
-        "-FileCreateDate<ContentCreateDate" \
-        "-FileModifyDate<TrackCreateDate" \
-        "-FileCreateDate<TrackCreateDate" \
-        "-FileModifyDate<MediaCreateDate" \
-        "-FileCreateDate<MediaCreateDate" \
-        "-FileModifyDate<CreateDate" \
-        "-FileCreateDate<CreateDate" \
-        "-FileModifyDate<DateTimeOriginal" \
-        "-FileCreateDate<DateTimeOriginal" \
-        "-ModifyDate<DateTimeOriginal" \
-        "-ModifyDate<CreateDate" \
-        "$dst" &> /dev/null
+    local write_args=(-overwrite_original -P -FileModifyDate="$meta_date" -FileCreateDate="$meta_date")
+    if (( ! HAS_EXIF_DATE )); then
+        write_args+=(-CreateDate="$meta_date" -ModifyDate="$meta_date" -TrackCreateDate="$meta_date" -TrackModifyDate="$meta_date" -MediaCreateDate="$meta_date" -MediaModifyDate="$meta_date")
+    fi
+    exiftool "${write_args[@]}" "$dst" &> /dev/null
 }
 
 resolve_date() {
@@ -329,13 +293,7 @@ resolve_date() {
     CLEAN_DATE=""
     META_DATETIME=""
 
-    if [[ "$kind" == "foto" ]]; then
-        extract_year_month "$file" \
-            DateTimeOriginal CreateDate MediaCreateDate TrackCreateDate ContentCreateDate
-    else
-        extract_year_month "$file" \
-            MediaCreateDate CreateDate CreationDate DateTimeOriginal TrackCreateDate ContentCreateDate
-    fi
+    extract_year_month "$file"
 
     # Fallback: data nel nome file
     if ! is_valid_date_parts "$YEAR" "$MONTH"; then
@@ -443,10 +401,10 @@ while IFS= read -r -d '' FILE; do
 
     if cp -p "$FILE" "$TARGET_FILE" 2>/dev/null; then
         if [[ "$KIND" == "foto" ]]; then
-            apply_foto_metadata "$FILE" "$TARGET_FILE" "$YEAR" "$MONTH" "$CLEAN_DATE" "$META_DATETIME"
+            apply_foto_metadata "$TARGET_FILE" "$YEAR" "$MONTH" "$CLEAN_DATE" "$META_DATETIME"
             ((TOTAL_FOTO++))
         else
-            apply_video_metadata "$FILE" "$TARGET_FILE" "$YEAR" "$MONTH" "$CLEAN_DATE" "$META_DATETIME"
+            apply_video_metadata "$TARGET_FILE" "$YEAR" "$MONTH" "$CLEAN_DATE" "$META_DATETIME"
             ((TOTAL_VIDEO++))
         fi
         if [[ "$REL_FOLDER" == "not_elaborate" ]]; then
@@ -542,11 +500,9 @@ DATE_NOW=$(date "+%Y-%m-%d %H:%M:%S")
         echo "Nessun errore riscontrato durante la lavorazione."
     fi
     echo ""
-} > "$REPORT_FILE"
+}
 
 echo "------------------------------------------------"
 echo "Completato!"
 echo "Media organizzati in: $DEST_DIR"
-echo "Report salvato in:    $REPORT_FILE"
-echo "Report altri file:    ${DEST_DIR}/report_altri_file.md"
 echo "------------------------------------------------"

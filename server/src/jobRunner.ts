@@ -4,6 +4,7 @@ import fs from "fs"
 import os from "os"
 import path from "path"
 import { pb } from "./pb"
+import { organizeFlatDir } from "./organize"
 import { JobRecord, JobTimings, LogPhase, MediaType, ProgressEvent, UniqueRecord } from "./types"
 
 const PHOTO_EXTS = new Set(["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "dng", "cr2", "cr3", "nef", "arw", "raf", "orf", "rw2"])
@@ -555,19 +556,19 @@ async function runOrganize(jobId: string, job: Record<string, unknown>) {
   refreshReport(jobId).catch(() => undefined)
 
   const tOrg = Date.now()
-  let produced = Number(job.files_unique || 0)
-  let withoutMeta = 0
-  if (!job.dry_run) {
-    const script = path.join(SCRIPTS_DIR, scriptName)
-    const org = (job.org_dir as string) || path.join(job.dest_dir as string, "organizzate")
-    fs.mkdirSync(org, { recursive: true })
-    const code = await runScript(script, [job.flat_dir as string, org], (line) => {
-      logLine(jobId, "organize", line)
-    })
-    if (code !== 0) errors += 1
-    produced = countMedia(org, mediaType)
-    withoutMeta = countWithoutMeta(org)
-  }
+  const org = (job.org_dir as string) || path.join(job.dest_dir as string, "organizzate")
+  const flat = job.flat_dir as string
+  fs.mkdirSync(org, { recursive: true })
+  const files = scanFiles(flat, mediaType, org, org + "__never")
+  logLine(jobId, "organize", `File da organizzare: ${files.length}`)
+  const orgRes = await organizeFlatDir(flat, org, mediaType, files, !!job.dry_run, (line, current, total) => {
+    logLine(jobId, "organize", line)
+    emit(jobId, { type: "progress", step: "organize", phase: "organize", current, total, message: line })
+  })
+  let produced = orgRes.produced
+  let withoutMeta = orgRes.withoutMeta
+  errors += orgRes.errors
+  if (orgRes.skipped) logLine(jobId, "organize", `Saltati ${orgRes.skipped} già in indice DB`)
   timings.organize_ms = Date.now() - tOrg
   const latest = await pb.collection("jobs").getOne(jobId)
   const latestTimings = { ...((latest.timings as JobTimings) || {}) }

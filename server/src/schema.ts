@@ -99,6 +99,14 @@ export async function ensureSchema() {
     num("duplicate_count"),
     json("duplicate_paths"),
   ])
+
+  await createCollection("organized_media", [
+    text("source_path", true),
+    text("dest_path"),
+    num("size"),
+    num("mtime"),
+    text("folder"),
+  ])
 }
 
 async function ensureJobFields() {
